@@ -13,52 +13,28 @@ const authRoutes = [
   },
   {
     method: 'POST',
-    path: '/verify/{userid}',
+    path: '/verify/{userId}',
     handler: authHandler.verifyToken,
-  },
-
-  {
-    method: 'GET',
-    path: '/product',
-    handler: authHandler.getAllProducts,
-  },
-  {
-    method: 'GET',
-    path: '/product/{productId}',
-    handler: authHandler.getProductById,
-  },
-  {
-  
-    method: 'GET',
-    path: '/product/category/{category}',
-    handler: authHandler.getProductsByCategory,
-  
-  },
-  {
-    method: 'GET',
-    path: '/product/seller/{sellerId}',
-    handler: authHandler.getProductsBySeller,
-  },
-  {
-    method: 'GET',
-    path: '/product/search', 
-    handler: authHandler.searchProducts,
-  },
-  {
-    method: 'POST',
-    path: '/product',
-    handler: authHandler.addProduct,
   },
   {
     method: 'PUT',
-    path: '/product/{productId}',
-    handler: authHandler.updateProduct,
+    path: '/user/{userId}',
+    handler: authHandler.userUpdate,
+    options: {
+      payload: {
+        allow: 'multipart/form-data',
+        output: 'stream',
+        multipart: true,
+        parse: true,
+        maxBytes: 1000000
+      }
+    }
   },
   {
     method: 'DELETE',
-    path: '/product/{productId}',
-    handler: authHandler.deleteProduct,
-  },
+    path: '/user/{userId}',
+    handler: authHandler.userDelete,
+  }
 ];
 
 module.exports = authRoutes;

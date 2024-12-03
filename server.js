@@ -1,12 +1,16 @@
 const Hapi = require('@hapi/hapi');
 const admin = require('firebase-admin');
 const authRoutes = require('./routes/authRoutes');
+const productsRoutes = require('./routes/productsRoutes');
+const transactionsRoutes = require('./routes/transactionsRoutes');
 require('dotenv').config();
 
 // Initialize Firebase Admin SDK
 admin.initializeApp({
   credential: admin.credential.cert(require('./firebase-service-account.json')),
 });
+
+
 
 const init = async () => {
   const server = Hapi.server({
@@ -15,7 +19,7 @@ const init = async () => {
   });
 
   // Register routes
-  server.route(authRoutes);
+  server.route([...authRoutes, ...productsRoutes, ...transactionsRoutes]);
 
   await server.start();
   console.log(`Server running on ${server.info.uri}`);

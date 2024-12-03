@@ -4,15 +4,16 @@ const admin = require('firebase-admin');
 const { getAuth, signInWithEmailAndPassword } = require('firebase/auth');
 const firebase = require('firebase/app');
 const sendEmail = require('../services/emailService');
+const { uploadFileToBucket, deleteFileToBucket } = require('../services/cloudStorageServices');  // Mengimpor fungsi upload
 
 // Firebase Client SDK Configuration
 const firebaseConfig = {
-    apiKey: "AIzaSyDIdYx3mGLxxuZeXz8cXhMew44g-0kQkf8",
-    authDomain: "agresia-8d511.firebaseapp.com",
-    projectId: "agresia-8d511",
-    storageBucket: "agresia-8d511.firebasestorage.app",
-    messagingSenderId: "679556135453",
-    appId: "1:679556135453:web:863ad9fc854077caece4f4"
+    apiKey: "AIzaSyAlX1UJBrWoZ8_EOvqI5JcoRTzn3IvxWGw",
+    authDomain: "agrease-capstone-cfb92.firebaseapp.com",
+    projectId: "agrease-capstone-cfb92",
+    storageBucket: "agrease-capstone-cfb92.firebasestorage.app",
+    messagingSenderId: "60968150439",
+    appId: "1:60968150439:web:2ce6eb424157fc3c4f4282"
 };
 
 if (!firebase.getApps().length) {
@@ -34,66 +35,52 @@ if (!firebase.getApps().length) {
 // Register User
 const registerUser = async (request, h) => {
   const db = admin.firestore();
-  const { email, password, displayName, phone, address } = request.payload;
+  const { email, password, name, phone, address } = request.payload;
 
   try {
     const user = await admin.auth().createUser({
       email,
       password,
-      displayName,
+      displayName: name,
     });
 
-    function getRandomSixDigit() {
-      return Math.floor(100000 + Math.random() * 900000);
-    }
+    // Generate a random 6-digit code for verification
+    const code = Math.floor(100000 + Math.random() * 900000);
 
-    let code = getRandomSixDigit();
+    const link = `${process.env.BASE_URL}/verify/${user.uid}`;
+    const imageUrl = 'https://storage.cloud.google.com/agrease-capstone-17/user-profile-images/profile-image.jpg';
+    
+    // Send verification email
+    await sendEmail({
+      fromName: 'Agrease Admin',
+      fromAddress: 'irpansyah810@gmail.com',
+      toName: name,
+      toAddress: email,
+      subject: 'Email Verification',
+      content: `Hello ${name},\n\nPlease verify your email using the code:\n\n${code}\n\nThank you!\nAgrease Team`,
+    });
 
-    let link = process.env.BASE_URL;
-    // const token = await admin.auth().createCustomToken(user.uid);
-    // const tokenId = saveTokenToDatabase(token);
-    link = link + "/verify/" + user.uid;
-     // Kirim email verifikasi menggunakan layanan Fimail
-     await sendEmail({
-       fromName: 'Agrease Admin',
-       fromAddress: 'irpansyah810@gmail.com',
-       toName: displayName,
-       toAddress: email,
-       subject: 'Email Verification',
-       content: `Hello ${displayName},\n\nPlease verify your email with the link:\n\n${link}\n\n  using the code:\n\n${code}\n\nThank you!\nAgrease Team`,
-     });
-
-    // Simpan data pengguna ke Firestore
+    // Save user data to Firestore
     const userRef = db.collection('users-profile').doc(user.uid);
-
     await userRef.set({
       uid: user.uid,
       email: user.email,
-      nama: user.displayName,
-      phone: phone,
-      address: address,
+      name: user.displayName,
+      phone,
+      address,
+      imageUrl,
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       role: 'buyer',
-      isVerified: code // Menandakan apakah user sudah memverifikasi emailnya
-   });
+      isVerified: code, // Indicating the email verification code
+    });
 
-     // Buat link verifikasi email
-    //  const verificationLink = await admin.auth().generateEmailVerificationLink(email);
-    // let link = process.env.BASE_URL;
-    // const token = await admin.auth().createCustomToken(user.uid);
-    // const tokenId = saveTokenToDatabase(token);
-    // link = link + "/verify/" + tokenId;
-
-    
     return h.response({ success: true, message: 'User registered successfully', uid: user.uid }).code(201);
   } catch (error) {
-    return h.response({ error: error.message }).code(400);
+    console.error('Error registering user:', error);
+    return h.response({ success: false, error: error.message }).code(400);
   }
 };
-
-
-
-
 
 
 
@@ -103,462 +90,209 @@ const loginUser = async (request, h) => {
   const db = admin.firestore();
   const { email, password } = request.payload;
 
-  // Cek apakah sudah verifikasi atau belum
-  const userRef = db.collection('users-profile');
-  const doc = await userRef.where('email', '==', email).get();
+  try {
+    // Check if the user is registered
+    const userRef = db.collection('users-profile');
+    const doc = await userRef.where('email', '==', email).get();
 
-
-  if (doc._size < 1) {
-    console.log('Email Belum Terdaftar.');
-    return h.response({ success: false, err: "Email Kamu Belum Terdaftar." }).code(404);
-  }
-  // console.log(doc);
-  // Simpan data dalam variabel
-  let userData = null;
-
-  doc.forEach(d => {
-    userData = {  ...d.data() }; // Gabungkan ID dokumen dengan data
-  });
-  // Mengambil data dari field tertentu
-  // const userData = doc.data();
-  const fieldValue = userData.isVerified;
-
-  
-
-  if (fieldValue === true) {
-    try {
-      const auth = getAuth();
-      const userCredential = await signInWithEmailAndPassword(auth, email, password);
-      const user = userCredential.user;
-  
-      // Generate custom token with Firebase Admin SDK
-      // const token = await admin.auth().createCustomToken(user.uid);
-  
-      return h.response({ success: true, message: 'Login successful', data: userData }).code(200);
-    } catch (error) {
-      return h.response({success: false, error: error.message }).code(400);
+    if (doc.empty) {
+      return h.response({ success: false, error: "Email not registered." }).code(404);
     }
 
- }else {
-    console.log('Email Belum Terverifikasi.');
-    return h.response({ success: false, err: "Email Kamu Belum Terverifikasi." }).code(400);
- }
+    // Extract user data
+    let userData = null;
+    doc.forEach(d => {
+      userData = { ...d.data() }; // Combine document ID with data
+    });
 
- 
+    if (userData.isVerified !== true) {
+      return h.response({ success: false, error: "Email not verified." }).code(400);
+    }
+
+    // Authenticate user using Firebase Auth
+    const auth = getAuth();
+    const userCredential = await signInWithEmailAndPassword(auth, email, password);
+    const user = userCredential.user;
+
+    return h.response({ success: true, message: 'Login successful', data: userData }).code(200);
+  } catch (error) {
+    console.error('Error logging in:', error);
+    return h.response({ success: false, error: error.message }).code(400);
+  }
 };
-
-
-
 
 
 // Verify Token
 const verifyToken = async (request, h) => {
   const db = admin.firestore();
-  
-
-  const { userid } = request.params;
-  const {codeOTP} = request.payload;
-  // const tokenBenar = await getTokenFromDatabase(token); // Mengambil token yang sesuai
-  // console.log(tokenBenar);
+  const { userId } = request.params;
+  const { codeOTP } = request.payload;
 
   try {
-    const userRef = db.collection('users-profile').doc(userid);
+    const userRef = db.collection('users-profile').doc(userId);
     const doc = await userRef.get();
 
-    // Mengecek apakah dokumen ditemukan
     if (!doc.exists) {
-      console.log('Data tidak ditemukan/Url Kamu Salah');
-      return h.response({ success: false, err: "Data Tidak Ditemukan/Url Kamu Salah" }).code(404);
+      return h.response({ success: false, error: "Data not found or invalid URL" }).code(404);
     }
 
+    const userData = doc.data();
+    if (userData.isVerified == codeOTP) {
+      // Update verification status to true
+      await userRef.update({ isVerified: true });
 
-       // Mengambil data dari field tertentu
-       const userData = doc.data();
-       const fieldValue = userData.isVerified;  // Ganti 'fieldName' dengan nama field yang ingin diperiksa
-   
-       // Melakukan pengecekan nilai field
-       if (fieldValue === codeOTP) {
-          try {
-            // Jika OTP benar, update field 'isVerified' menjadi true
-            await userRef.update({
-              isVerified: true
-            });
-            console.log('Verifikasi berhasil dan field isVerified diperbarui!');
-        
-            return h.response({ success: true, message: "Verifikasi Berhasil!.", uid: userid }).code(200);
-          } catch (error) {
-            console.error('Error updating field: ', error);
-            return h.response({ success: false, err: "Gagal memperbarui status verifikasi" }).code(500);
+      return h.response({ success: true, message: "Verification successful!" }).code(200);
+    } else {
+      return h.response({ success: false, error: "Invalid OTP code" }).code(400);
+    }
+  } catch (error) {
+    console.error('Error during verification:', error);
+    return h.response({ success: false, error: 'Invalid token or internal error' }).code(400);
+  }
+};
+
+
+  // Update data User Profile
+const userUpdate = async (request, h) => {
+  const db = admin.firestore();
+  const userId = request.params.userId; // Penyesuaian params userId
+
+  const { name, phone, address } = request.payload;
+
+  // Validasi field yang diperlukan
+  if (!name || !phone || !address) {
+    return h.response({
+      success: false,
+      message: "All fields (name, phone, address) are required",
+    }).code(400);
+  }
+
+  try {
+    const dataUser = db.collection("users-profile").doc(userId);
+    const dataUserDoc = await dataUser.get();
+
+    // console.log(dataUserDoc);
+
+    // Validasi jika user tidak ditemukan
+    if (!dataUserDoc.exists) {
+      return h.response({
+        success: false,
+        message: `User with ID ${userId} not found`,
+      }).code(404);
+    }
+
+     // Jika file gambar diupload
+     let imageUrl = null;
+     if (request.payload.image) {
+      const userData = dataUserDoc.data();
+      const imagePath = userData.imageUrl;
+
+      // Ekstrak path file dari URL
+      const urlParts = imagePath.split('/');
+      const fileName = urlParts[urlParts.length - 1]; // Ambil bagian terakhir dari URL sebagai nama file
+
+      if(fileName !== "profile-image.jpg"){
+        const filePath = `user-profile-images/${fileName}`; // Path relatif di dalam bucket
+        if(!deleteFileToBucket(filePath)){
+          console.log("Gagal Menghapus file!");
+          return false;
           }
-
-       } else {
-         console.log('Kode OTP salah');
-         return h.response({ success: false, err: "Kode OTP kamu Salah." }).code(400);
-       }
-    // const decodedToken = await admin.auth().verifyIdToken(tokenBenar);
-    // return h.response({ uid: decodedToken.uid, email: decodedToken.email }).code(200);
-  } catch (error) {
-    return h.response({ success: false, error: 'Invalid token' }).code(400);
-  }
-};
-
-
-
-
-//menampilkan product
-const getAllProducts = async (request, h) => {
-  const db = admin.firestore();
-    try {
-      const productsSnapshot = await db.collection("products").get();
-  
-      if (productsSnapshot.empty) {
-        return h.response({
-          success: false,
-          message: "No products found",
-          data: [],
-        }).code(404);
       }
-  
-      const products = [];
-      productsSnapshot.forEach((doc) => {
-        products.push({ id: doc.id, ...doc.data() });
-      });
-  
-      return h.response({
-        success: true,
-        message: "Products Data has been fetched successfully",
-        data: products,
-      }).code(200);
-    } catch (error) {
-      console.error("Error fetching products:", error);
-      return h.response({
-        success: false,
-        message: "Internal server error",
-      }).code(500);
-    }
-};
+       const file = request.payload.image;
+       imageUrl = await uploadFileToBucket(file); // Unggah gambar dan ambil URL
+     }
 
-
-
-//get produk by ID
-const getProductById = async (request, h) => {
-  const db = admin.firestore();
-  const { productId } = request.params;
-
-  try {
-    // Ambil data produk berdasarkan ID
-    const productRef = db.collection("products").doc(productId);
-    const productDoc = await productRef.get();
-
-    if (!productDoc.exists) {
-      return h.response({
-        success: false,
-        message: `Product with ID ${productId} not found`,
-      }).code(404);
-    }
-
-    const productData = { id: productDoc.id, ...productDoc.data() };
-
-    return h.response({
-      success: true,
-      message: "Detail Product Data has been fetched successfully",
-      data: productData,
-    }).code(200);
-  } catch (error) {
-    console.error("Error fetching product:", error);
-    return h.response({
-      success: false,
-      message: "Internal server error",
-    }).code(500);
-  }
-};
-
-
-//get product by category
-const getProductsByCategory = async (request, h) => {
-  const db = admin.firestore();
-  const { category } = request.params; // Ambil kategori dari path parameter
-
-  try {
-    if (!category) {
-      return h.response({
-        success: false,
-        message: "Category is required",
-      }).code(400);
-    }
-
-    // Query Firestore untuk produk berdasarkan kategori
-    const productsSnapshot = await db
-      .collection("products")
-      .where("category", "==", category)
-      .get();
-
-    if (productsSnapshot.empty) {
-      return h.response({
-        success: false,
-        message: `No products found in category ${category}`,
-        data: [],
-      }).code(404);
-    }
-
-    // Map data produk ke array
-    const products = [];
-    productsSnapshot.forEach((doc) => {
-      products.push({ id: doc.id, ...doc.data() });
-    });
-
-    return h.response({
-      success: true,
-      message: "Product Data by Category has been fetched successfully",
-      data: products,
-    }).code(200);
-  } catch (error) {
-    console.error("Error fetching products by category:", error);
-    return h.response({
-      success: false,
-      message: "Internal server error",
-    }).code(500);
-  }
-};
-
-
-
-//menampilkan product by seller
-const getProductsBySeller = async (request, h) => {
-  const db = admin.firestore();
-  const { sellerId } = request.params;
-
-  try {
-    // Query produk berdasarkan sellerId
-    const productsSnapshot = await db
-      .collection("products")
-      .where("sellerId", "==", sellerId)
-      .get();
-
-    if (productsSnapshot.empty) {
-      return h.response({
-        success: false,
-        message: `No products found for seller with ID ${sellerId}`,
-        data: [],
-      }).code(404);
-    }
-
-    // Map hasil query ke array
-    const products = [];
-    productsSnapshot.forEach((doc) => {
-      products.push({ id: doc.id, ...doc.data() });
-    });
-
-    return h.response({
-      success: true,
-      message: "Product Data by Seller has been fetched successfully",
-      data: products,
-    }).code(200);
-  } catch (error) {
-    console.error("Error fetching products by seller:", error);
-    return h.response({
-      success: false,
-      message: "Internal server error",
-    }).code(500);
-  }
-};
-
-
-
-//search product
-const searchProducts = async (request, h) => {
-  const db = admin.firestore();
-  const { q } = request.query; // Ambil parameter 'q' dari URL
-
-  // Validasi parameter query
-  if (!q) {
-    return h.response({
-      success: false,
-      message: "Search keyword is required",
-    }).code(400);
-  }
-
-  try {
-    // Query ke koleksi produk untuk mencocokkan nama produk
-    const productsSnapshot = await db.collection("products").where("name", "==", q).get();
-
-    if (productsSnapshot.empty) {
-      return h.response({
-        success: false,
-        message: "No products found matching the search keyword.",
-        data: [],
-      }).code(404);
-    }
-
-    // Mapping hasil query ke array
-    const products = [];
-    productsSnapshot.forEach((doc) => {
-      products.push({ id: doc.id, ...doc.data() });
-    });
-
-    // Kirimkan hasil produk
-    return h.response({
-      success: true,
-      message: "Product Data by Search has been fetched successfully",
-      data: products,
-    }).code(200);
-  } catch (error) {
-    console.error("Error fetching products:", error);
-    return h.response({
-      success: false,
-      message: "Internal server error",
-    }).code(500);
-  }
-};
-
-
-
-//create product
-const addProduct = async (request, h) => {
-  const db = admin.firestore();
-  const { image, price, name, description, stock } = request.payload;
-
-  // Validasi field yang diperlukan
-  if (!image || !price || !name || !description || !stock) {
-    return h.response({
-      success: false,
-      message: "All fields (image, price, name, description, stock) are required",
-    }).code(400);
-  }
-
-  try {
-    // Data produk baru
-    const newProduct = {
-      image,
-      price,
+    // Data untuk memperbarui profil pengguna
+    const updateUserData = {
       name,
-      description,
-      stock,
-      createdAt: admin.firestore.FieldValue.serverTimestamp(), // Tambahkan timestamp
+      phone,
+      address,
+      imageUrl,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     };
 
-    // Simpan produk baru ke Firestore
-    const productRef = await db.collection("products").add(newProduct);
-
-    // Kirimkan respons dengan data produk yang berhasil dibuat
-    return h.response({
-      success: true,
-      message: "Product has been created successfully",
-      data: { id: productRef.id, ...newProduct },
-    }).code(201);
-  } catch (error) {
-    console.error("Error creating product:", error);
-    return h.response({
-      success: false,
-      message: "Internal server error",
-    }).code(500);
-  }
-};
-
-
-
-
-//update product
-const updateProduct = async (request, h) => {
-  const db = admin.firestore();
-  const { productId } = request.params;
-  const { image, price, name, description, stock } = request.payload;
-
-  // Validasi field yang diperlukan
-  if (!image || !price || !name || !description || !stock) {
-    return h.response({
-      success: false,
-      message: "All fields (image, price, name, description, stock) are required",
-    }).code(400);
-  }
-
-  try {
-    // Ambil referensi produk berdasarkan productId
-    const productRef = db.collection("products").doc(productId);
-    const productSnapshot = await productRef.get();
-
-    if (!productSnapshot.exists) {
-      return h.response({
-        success: false,
-        message: `Product with ID ${productId} not found`,
-      }).code(404);
-    }
-
-    // Perbarui data produk
-    const updatedProduct = {
-      image,
-      price,
-      name,
-      description,
-      stock,
-      updatedAt: admin.firestore.FieldValue.serverTimestamp(), // Tambahkan timestamp pembaruan
-    };
-
-    await productRef.update(updatedProduct);
+    // Update data pengguna di Firestore
+    await dataUser.update(updateUserData);
 
     // Kirim respons sukses
     return h.response({
       success: true,
-      message: "Product Data has been updated successfully",
-      data: { id: productId, ...updatedProduct },
+      message: "User profile has been updated successfully",
+      data: { id: userId, ...updateUserData },
     }).code(200);
+
   } catch (error) {
-    console.error("Error updating product:", error);
+    console.error("Error updating user profile:", error);
     return h.response({
       success: false,
-      message: "Internal server error",
+      message: "Failed to update user profile. Please try again!",
     }).code(500);
   }
 };
 
 
-
-
-//menghapus product
-const deleteProduct = async (request, h) => {
+// Delete User Profile
+const userDelete = async (request, h) => {
   const db = admin.firestore();
-  const { productId } = request.params;
+  const { userId } = request.params;
 
   try {
-    // Ambil referensi produk berdasarkan productId
-    const productRef = db.collection("products").doc(productId);
-    const productSnapshot = await productRef.get();
+    // Ambil referensi user berdasarkan userId
+    const userRef = db.collection("users-profile").doc(userId); // Penyesuaian nama koleksi
+    const userSnapshot = await userRef.get(); // Penyesuaian nama variabel untuk snapshot
 
-    if (!productSnapshot.exists) {
+    if (!userSnapshot.exists) {
       return h.response({
         success: false,
-        message: `Product with ID ${productId} not found`,
+        message: `User with ID ${userId} not found`,
       }).code(404);
     }
+    const userData = userSnapshot.data();
+    const imagePath = userData.imageUrl;
 
-    // Hapus produk dari Firestore
-    await productRef.delete();
+     // Ekstrak path file dari URL
+     const urlParts = imagePath.split('/');
+     const fileName = urlParts[urlParts.length - 1]; // Ambil bagian terakhir dari URL sebagai nama file
 
+     if(fileName !== "profile-image.jpg"){
+       const filePath = `user-profile-images/${fileName}`; // Path relatif di dalam bucket
+      if(!deleteFileToBucket(filePath)){
+        console.log("Gagal Menghapus file!");
+        return false;
+      }
+     }
+
+     
+     // Hapus data user dari Firestore
+     await userRef.delete();
+     
+     // Hapus pengguna dari Firebase Authentication
+    await admin.auth().deleteUser(userId);
     // Kirim respons sukses
     return h.response({
       success: true,
-      message: "Product Data has been deleted successfully",
-      data: { id: productId },
+      message: "User profile has been deleted successfully",
+      data: { id: userId },
     }).code(200);
   } catch (error) {
-    console.error("Error deleting product:", error);
+    console.error("Error deleting user:", error);
     return h.response({
       success: false,
-      message: "Internal server error",
+      message: "Internal server error. Please try again!",
     }).code(500);
   }
 };
+
+
+
+
+
+
 
 module.exports = {
   registerUser,
   loginUser,
   verifyToken,
-  getAllProducts,
-  getProductById,
-  getProductsByCategory,
-  getProductsBySeller,
-  searchProducts,
-  addProduct,
-  updateProduct,
-  deleteProduct
+  userUpdate,
+  userDelete
 };
