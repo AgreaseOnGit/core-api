@@ -15,8 +15,13 @@ admin.initializeApp({
 
 const init = async () => {
   const server = Hapi.server({
-    port: process.env.PORT || 5000,
-    host: 'localhost',
+    port: process.env.PORT || 3000,
+    host: '0.0.0.0',
+    routes: {
+      cors: {
+        origin: ['*'],
+      },
+    }
   });
 
   await server.register(Inert);
